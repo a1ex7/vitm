@@ -12,8 +12,8 @@ LOCAL_TZ = pytz.timezone("Europe/Kiev")
 
 # --- Параметры периода для анализа ---
 # Можно менять на нужный диапазон, формат 'YYYY-MM-DD HH:MM:SS' (локальное время)
-START_TIME = "2025-12-20 15:00:00"
-END_TIME   = "2025-12-20 16:00:00"
+START_TIME = "2025-12-22 06:30:00"
+END_TIME   = "2025-12-22 10:00:00"
 TIME_STEP = "5s"  # или '30s'
 
 # --- Загружаем данные ---
@@ -154,55 +154,4 @@ plt.tight_layout()
 plt.savefig("analyze/online_statuses_heatmap_timeline.png")
 plt.close()
 
-
-# --- Timeline ---
-plt.figure(figsize=(15, len(timeline.columns) * 0.6 + 2))
-
-for i, user_id in enumerate(timeline.columns):
-    online_periods = timeline[user_id] == 1
-
-    start = None
-    for t, is_online in online_periods.items():
-        if is_online and start is None:
-            start = t
-        elif not is_online and start is not None:
-            plt.barh(
-                y=i,
-                width=(t - start).total_seconds() / 60,
-                left=start,
-                height=0.4
-            )
-            start = None
-
-    # если онлайн до конца периода
-    if start is not None:
-        plt.barh(
-            y=i,
-            width=(timeline.index[-1] - start).total_seconds() / 60,
-            left=start,
-            height=0.4
-        )
-
-plt.yticks(range(len(timeline.columns)), timeline.columns)
-plt.xlabel("Time")
-plt.ylabel("User ID")
-plt.title(f"User Online Timeline\n{START_TIME} — {END_TIME}")
-plt.tight_layout()
-plt.savefig("analyze/online_timeline_gantt.png")
-plt.close()
-
-
-# --- Визуализация корреляции ---
-corr = df_pivot.corr().values
-users = df_pivot.columns.tolist()
-plt.figure(figsize=(6,5))
-plt.imshow(corr, cmap='coolwarm', vmin=-1, vmax=1)
-plt.colorbar(label='Correlation')
-plt.xticks(ticks=np.arange(len(users)), labels=users)
-plt.yticks(ticks=np.arange(len(users)), labels=users)
-plt.title(f'Корреляция онлайн-статусов\n{START_TIME} — {END_TIME}')
-plt.tight_layout()
-plt.savefig("analyze/correlation.png")
-plt.close()
-
-print("\n✅ Графики сохранены: 'online_statuses_heatmap.png', 'correlation.png'")
+print("\n✅ Графики сохранены")

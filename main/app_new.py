@@ -12,7 +12,6 @@ api_id = 29477438
 api_hash = "b35cd0b313143486e8ca98cbb275ee2f"
 USERS = ["@Viktoriia_dreams", "@Prado_ua"]
 CHECK_INTERVAL = 5
-TOTAL_DURATION = 2*60*60
 
 DB_FILE = "online_statuses.db"
 LOCAL_TZ = pytz.timezone("Europe/Kiev")
@@ -89,7 +88,7 @@ async def get_online_status(client, user):
                 last_seen = datetime.fromtimestamp(last_seen, tz=timezone.utc)
             return "offline", last_seen
 
-        return "other", now
+        return "offline", now
 
     except FloodWaitError as e:
         print(f"FloodWaitError: ждём {e.seconds} секунд")
@@ -110,6 +109,7 @@ def save_status(user, status, ts):
         conn.commit()
 
     # Если offline — сохраняем предыдущий online по last_seen
+    now = datetime.now(timezone.utc)
     if status == "offline":
         cur.execute("""
             INSERT OR IGNORE INTO online_statuses(user_id, date, status) VALUES (?, ?, ?)
@@ -118,7 +118,7 @@ def save_status(user, status, ts):
     # Сохраняем текущий статус (online или offline)
     cur.execute("""
         INSERT OR IGNORE INTO online_statuses(user_id, date, status) VALUES (?, ?, ?)
-    """, (user_id, ts.replace(microsecond=0).astimezone(timezone.utc).isoformat(), status))
+    """, (user_id, now.replace(microsecond=0).astimezone(timezone.utc).isoformat(), status))
     conn.commit()
 
 
@@ -173,12 +173,12 @@ def finalize_sessions():
 
 async def monitor_user(client, user):
     while not stop_event.is_set():
-        status, last_seen = await get_online_status(client, user)
+        status, ts = await get_online_status(client, user)
 
-        save_status(user, status, last_seen)
-        save_uptime(user, status, last_seen)
+        save_status(user, status, ts)
+        save_uptime(user, status, ts)
 
-        last_seen_local = last_seen.astimezone(LOCAL_TZ)
+        last_seen_local = ts.astimezone(LOCAL_TZ)
         now_local_str = datetime.now(LOCAL_TZ).strftime("%H:%M:%S")
 
         if status == "online":
