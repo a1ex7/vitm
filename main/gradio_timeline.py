@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 from datetime import datetime, timedelta
 import gradio as gr
 
@@ -38,6 +39,10 @@ def calc_range(preset: str):
     if preset == "Текущий час":
         start = now.replace(minute=0, second=0, microsecond=0)
         end = start + timedelta(hours=1)
+
+    elif preset == "Рабочий день":
+        start = now.replace(hour=7, minute=0, second=0)
+        end = now.replace(hour=19, minute=0, second=0)
 
     elif preset == "Последние 3 часа":
         start = now - timedelta(hours=3)
@@ -99,6 +104,35 @@ def load_statuses(start_dt, end_dt):
     df["status_num"] = df["status"].map({"online": 1, "offline": 0})
     return df[(df.date >= start_dt) & (df.date <= end_dt)]
 
+def load_sessions(start_dt, end_dt):
+    conn = sqlite3.connect(DB_FILE)
+
+    df = pd.read_sql_query(
+        """
+        SELECT user_id, started_at, ended_at, duration
+        FROM online_sessions
+        """,
+        conn
+    )
+
+    conn.close()
+
+    if df.empty:
+        return df
+
+    # даты → datetime UTC → LOCAL_TZ
+    df["started_at"] = pd.to_datetime(df["started_at"], utc=True).dt.tz_convert(LOCAL_TZ)
+    df["ended_at"] = pd.to_datetime(df["ended_at"], utc=True).dt.tz_convert(LOCAL_TZ)
+
+    # оставляем только сессии, пересекающие период
+    df = df[
+        (df["ended_at"] >= start_dt) &
+        (df["started_at"] <= end_dt)
+    ]
+
+    return df
+
+
 # --------------------------------------------------
 # Plot
 # --------------------------------------------------
@@ -113,6 +147,8 @@ def build_heatmap(start_time, end_time, step_sec):
     if df.empty:
         return None
 
+    df_sessions = load_sessions(start_dt, end_dt)
+
     time_index = pd.date_range(
         start=start_dt,
         end=end_dt,
@@ -126,7 +162,7 @@ def build_heatmap(start_time, end_time, step_sec):
         events = (
             df[df.user_id == uid]
             .sort_values("date")
-            .drop_duplicates("date")
+            .drop_duplicates(subset=["date"], keep="last")
             .set_index("date")
         )
         label = USER_MAP.get(uid, f"User {uid}")
@@ -135,9 +171,75 @@ def build_heatmap(start_time, end_time, step_sec):
     fig, ax = plt.subplots(figsize=(15, len(timeline.columns)*0.5 + 2))
     im = ax.imshow(timeline.T, aspect="auto", cmap="Greens", interpolation="nearest")
 
-    plt.colorbar(im, ax=ax, label="Online (1) / Offline (0)")
-    ax.set_yticks(range(len(timeline.columns)))
-    ax.set_yticklabels(timeline.columns)
+    # === OVERLAY ONLINE SESSIONS ===
+    user_ypos = {user: i for i, user in enumerate(timeline.columns)}
+
+    for _, row in df_sessions.iterrows():
+        user_label = USER_MAP.get(row["user_id"])
+        if user_label not in user_ypos:
+            continue
+
+        y = user_ypos[user_label]
+
+        # обрезаем сессию по выбранному периоду
+        s = max(row["started_at"], start_dt)
+        e = min(row["ended_at"], end_dt)
+
+        if e <= s:
+            continue
+
+        # перевод времени в координаты heatmap
+        x_start = np.searchsorted(timeline.index, s)
+        x_end = np.searchsorted(timeline.index, e)
+
+        rect = Rectangle(
+            (x_start, y - 0.3),  # x, y
+            x_end - x_start,  # width
+            0.6,  # height
+            facecolor="lime",
+            alpha=0.35,
+            edgecolor=None
+        )
+
+        ax.add_patch(rect)
+
+    # Uptime for Users
+    user_labels = []
+
+    for user_label in timeline.columns:
+        user_id = {v: k for k, v in USER_MAP.items()}.get(user_label)
+
+        if df_sessions.empty or user_id not in df_sessions["user_id"].values:
+            label_text = f"{user_label} — 0м"
+            user_labels.append(label_text)
+            continue
+
+        user_sess = df_sessions[df_sessions["user_id"] == user_id]
+
+        # корректируем сессии по границам периода
+        total_online_seconds = 0
+        for _, r in user_sess.iterrows():
+            s = max(r["started_at"], start_dt)
+            e = min(r["ended_at"], end_dt)
+            delta = (e - s).total_seconds()
+            if delta > 0:
+                total_online_seconds += delta
+
+        hours = int(total_online_seconds // 3600)
+        minutes = int((total_online_seconds % 3600) // 60)
+
+        label_text = f"{user_label}\n{hours}ч {minutes}мин"
+        user_labels.append(label_text)
+
+    # Используем подписи на оси Y
+    plt.yticks(
+        ticks=np.arange(len(timeline.columns)),
+        labels=user_labels
+    )
+
+    # plt.colorbar(im, ax=ax, label="Online (1) / Offline (0)")
+    # ax.set_yticks(range(len(timeline.columns)))
+    # ax.set_yticklabels(timeline.columns)
 
     xticks = np.arange(0, len(timeline), max(1, len(timeline)//20))
     ax.set_xticks(xticks)
@@ -148,12 +250,14 @@ def build_heatmap(start_time, end_time, step_sec):
 
     ax.set_title(
         f"Online Status Heatmap\n"
-        f"{start_dt.strftime('%Y-%m-%d %H:%M')} — {end_dt.strftime('%Y-%m-%d %H:%M')}"
+        f"{start_dt.strftime('%Y-%m-%d %H:%M')} - {end_dt.strftime('%Y-%m-%d %H:%M')}"
     )
-    ax.set_xlabel("Time")
-    ax.set_ylabel("User")
+    # ax.set_xlabel("Time")
+    # ax.set_ylabel("User")
 
     plt.tight_layout()
+    plt.close(fig)
+
     return fig
 
 # --------------------------------------------------
@@ -162,37 +266,51 @@ def build_heatmap(start_time, end_time, step_sec):
 with gr.Blocks(title="Telegram Online Timeline") as demo:
     gr.Markdown("## 📊 Telegram Online Timeline")
 
-    preset = gr.Dropdown(
-        label="Быстрый выбор диапазона",
-        choices=[
-            "Текущий час",
-            "Последние 3 часа",
-            "Последние 5 часов",
-            "Последние 10 часов",
-            "Текущий день",
-            "Прошлый день",
-            "Текущая неделя"
-        ],
-        value="Последние 3 часа"
-    )
+
 
     with gr.Row():
-        start_time = gr.Textbox(label="Start time")
-        end_time = gr.Textbox(label="End time")
+        with gr.Column():
+            preset = gr.Dropdown(
+                label="Быстрый выбор диапазона",
+                choices=[
+                    "Текущий час",
+                    "Рабочий день",
+                    "Последние 3 часа",
+                    "Последние 5 часов",
+                    "Последние 10 часов",
+                    "Текущий день",
+                    "Прошлый день",
+                    "Текущая неделя"
+                ],
+                value="Последние 3 часа"
+            )
 
-    step = gr.Slider(
-        minimum=1,
-        maximum=3600,
-        value=60,
-        step=1,
-        label="Шаг (секунды)"
-    )
+        with gr.Column():
+            with gr.Row():
+                start_time = gr.Textbox(label="Start time")
+                end_time = gr.Textbox(label="End time")
 
-    auto = gr.Checkbox(label="Auto-refresh", value=False)
+    with gr.Row():
+        with gr.Column():
+            step = gr.Slider(
+                minimum=1,
+                maximum=60,
+                value=5,
+                step=1,
+                label="Шаг (секунды)"
+            )
+            auto = gr.Checkbox(label="Auto-refresh", value=False)
+
     plot = gr.Plot()
-    btn = gr.Button("🔄 Обновить")
+    btn = gr.Button("Обновить")
 
     preset.change(
+        fn=calc_range,
+        inputs=preset,
+        outputs=[start_time, end_time]
+    )
+
+    demo.load(
         fn=calc_range,
         inputs=preset,
         outputs=[start_time, end_time]
