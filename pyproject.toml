@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "python-course"
+name = "vitm"
 version = "0.1.0"
 description = ""
 authors = ["Your Name <you@example.com>"]
@@ -11,6 +11,7 @@ pandas = "^2.3.3"
 telethon = "^1.41.2"
 matplotlib = "^3.10.8"
 seaborn = "^0.13.2"
+plotly = "^6.5.0"
 
 
 [build-system]

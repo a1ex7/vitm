@@ -1,5 +1,6 @@
 import asyncio
 import sqlite3
+import pandas as pd
 from datetime import datetime, timezone
 import pytz
 from telethon import TelegramClient
@@ -10,7 +11,7 @@ import signal
 # === Настройки ===
 api_id = 29477438
 api_hash = "b35cd0b313143486e8ca98cbb275ee2f"
-USERS = ["@Viktoriia_dreams", "@Prado_ua"]
+# USERS = ["@Viktoriia_dreams", "@Prado_ua"]
 CHECK_INTERVAL = 5
 
 DB_FILE = "online_statuses.db"
@@ -98,6 +99,16 @@ async def get_online_status(client, user):
         print(f"Ошибка при проверке {user}: {e}")
         return "offline", datetime.now(timezone.utc)
 
+def get_active_user_ids():
+    conn = sqlite3.connect(DB_FILE)
+    # Выбираем только тех, у кого status или флаг активен
+    df_users = pd.read_sql_query(
+        "SELECT username FROM users WHERE active = 1",
+        conn
+    )
+    conn.close()
+    return df_users["username"].tolist()
+
 def save_status(user, status, ts):
     cur.execute("SELECT id FROM users WHERE username=?", (user,))
     row = cur.fetchone()
@@ -120,7 +131,6 @@ def save_status(user, status, ts):
         INSERT OR IGNORE INTO online_statuses(user_id, date, status) VALUES (?, ?, ?)
     """, (user_id, now.replace(microsecond=0).astimezone(timezone.utc).isoformat(), status))
     conn.commit()
-
 
 def save_uptime(user, status, ts):
     """
@@ -202,7 +212,7 @@ async def main():
     async with TelegramClient("monitor_session", api_id, api_hash) as client:
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGINT, shutdown)
-
+        USERS = get_active_user_ids()
         tasks = [asyncio.create_task(monitor_user(client, user)) for user in USERS]
 
         await stop_event.wait() # ждём Ctrl+C

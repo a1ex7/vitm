@@ -38,11 +38,15 @@ def calc_range(preset: str):
 
     if preset == "Текущий час":
         start = now.replace(minute=0, second=0, microsecond=0)
-        end = start + timedelta(hours=1)
+        end = now.replace(hour=23, minute=55, second=0)
 
     elif preset == "Рабочий день":
         start = now.replace(hour=7, minute=0, second=0)
         end = now.replace(hour=19, minute=0, second=0)
+
+    elif preset == "Последний 1 час":
+        start = now - timedelta(hours=1)
+        end = now.replace(hour=23, minute=55, second=0)
 
     elif preset == "Последние 3 часа":
         start = now - timedelta(hours=3)
@@ -86,16 +90,19 @@ def calc_range(preset: str):
 # --------------------------------------------------
 def load_users():
     conn = sqlite3.connect(DB_FILE)
-    df = pd.read_sql_query("SELECT id, username FROM users", conn)
+    df = pd.read_sql_query("SELECT id, username FROM users WHERE active = 1", conn)
     conn.close()
     return dict(zip(df.id, df.username))
 
 USER_MAP = load_users()
 
-def load_statuses(start_dt, end_dt):
+def load_statuses(start_dt, end_dt, active_user_ids):
     conn = sqlite3.connect(DB_FILE)
+
+    ids_tuple = tuple(active_user_ids)
+
     df = pd.read_sql_query(
-        "SELECT user_id, date, status FROM online_statuses",
+        f"SELECT user_id, date, status FROM online_statuses WHERE user_id IN {ids_tuple}",
         conn
     )
     conn.close()
@@ -104,13 +111,16 @@ def load_statuses(start_dt, end_dt):
     df["status_num"] = df["status"].map({"online": 1, "offline": 0})
     return df[(df.date >= start_dt) & (df.date <= end_dt)]
 
-def load_sessions(start_dt, end_dt):
+def load_sessions(start_dt, end_dt, active_user_ids):
     conn = sqlite3.connect(DB_FILE)
 
+    ids_tuple = tuple(active_user_ids)
+
     df = pd.read_sql_query(
-        """
+        f"""
         SELECT user_id, started_at, ended_at, duration
         FROM online_sessions
+        WHERE user_id IN {ids_tuple}
         """,
         conn
     )
@@ -143,11 +153,11 @@ def build_heatmap(start_time, end_time, step_sec):
         now_local()
     )
 
-    df = load_statuses(start_dt, end_dt)
+    df = load_statuses(start_dt, end_dt, USER_MAP.keys())
     if df.empty:
         return None
 
-    df_sessions = load_sessions(start_dt, end_dt)
+    df_sessions = load_sessions(start_dt, end_dt, USER_MAP.keys())
 
     time_index = pd.date_range(
         start=start_dt,
@@ -193,9 +203,9 @@ def build_heatmap(start_time, end_time, step_sec):
         x_end = np.searchsorted(timeline.index, e)
 
         rect = Rectangle(
-            (x_start, y - 0.3),  # x, y
+            (x_start, y - 0.2),  # x, y
             x_end - x_start,  # width
-            0.6,  # height
+            0.4,  # height
             facecolor="lime",
             alpha=0.35,
             edgecolor=None
@@ -210,7 +220,7 @@ def build_heatmap(start_time, end_time, step_sec):
         user_id = {v: k for k, v in USER_MAP.items()}.get(user_label)
 
         if df_sessions.empty or user_id not in df_sessions["user_id"].values:
-            label_text = f"{user_label} — 0м"
+            label_text = f"{user_label}"
             user_labels.append(label_text)
             continue
 
@@ -275,6 +285,7 @@ with gr.Blocks(title="Telegram Online Timeline") as demo:
                 choices=[
                     "Текущий час",
                     "Рабочий день",
+                    "Последний 1 час",
                     "Последние 3 часа",
                     "Последние 5 часов",
                     "Последние 10 часов",
