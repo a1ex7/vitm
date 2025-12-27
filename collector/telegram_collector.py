@@ -77,24 +77,23 @@ def save_session(username, status, ts):
 
 async def check_user(client, username):
     while not stop_event.is_set():
-        entity = await client.get_entity(username)
+        try:
+            entity = await client.get_entity(username)
+        except Exception as e:
+            print(f"❌ Failed to get {username}: {e}")
+            await asyncio.sleep(CHECK_INTERVAL)
+            continue
         now = datetime.now(UTC)
 
         if isinstance(entity.status, UserStatusOnline):
             status = "online"
             ts = now
-            print(
-                f"[{now}] {username} — "
-                f"Online"
-            )
-        else:
+        elif isinstance(entity.status, UserStatusOffline):
             status = "offline"
             ts = getattr(entity.status, "was_online", now)
-            print(
-                f"[{now}] {username} — "
-                f"Offline "
-                f"(last seen: {ts.strftime('%Y-%m-%d %H:%M:%S')})"
-            )
+        else:
+            status = "offline"
+            ts = now
 
         save_status(username, status, ts)
         save_session(username, status, ts)
@@ -111,6 +110,7 @@ async def main():
         loop.add_signal_handler(signal.SIGINT, shutdown)
 
         users = get_users()
+        print("👥 Monitoring users:", users)
 
         if not users:
             print("⚠️ No active users to monitor")
