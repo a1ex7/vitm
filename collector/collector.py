@@ -4,8 +4,8 @@ from datetime import datetime
 from telethon import TelegramClient
 from telethon.tl.types import UserStatusOnline, UserStatusOffline
 
-from config import API_ID, API_HASH, CHECK_INTERVAL, DB_FILE, LOCAL_TZ, UTC
-from db import connect, init_db
+from collector.config import API_ID, API_HASH, CHECK_INTERVAL, DB_FILE, LOCAL_TZ, UTC
+from collector.db import connect, init_db
 
 stop_event = asyncio.Event()
 active_sessions = {}

@@ -1,5 +1,7 @@
 .idea
+.env
 analyze
 monitor_session.session
 monitor_session.session-journal
+shared/*.db
 online_statuses.db

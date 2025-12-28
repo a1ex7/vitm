@@ -1,6 +1,5 @@
 import sqlite3
 import pandas as pd
-import pytz
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -8,9 +7,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from datetime import datetime, timedelta
 import gradio as gr
-
-DB_FILE = "online_statuses.db"
-LOCAL_TZ = pytz.timezone("Europe/Kiev")
+from collector.config import DB_FILE, LOCAL_TZ
 
 # --------------------------------------------------
 # Utils
@@ -340,4 +337,8 @@ with gr.Blocks(title="Telegram Online Timeline") as demo:
         outputs=plot
     )
 
-demo.launch()
+demo.launch(
+    server_name="0.0.0.0",
+    server_port=7860,
+    share=False
+)
