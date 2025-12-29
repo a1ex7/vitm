@@ -1,0 +1,8 @@
+telethon==1.41.2
+pytz
+pandas
+numpy
+matplotlib
+seaborn
+gradio
+python-dotenv
